@@ -2,9 +2,9 @@ import React from '../react';
 
 const element = (
     <div id="foo">
-        <a>bar</a>
-        <b />
+        <h1>React study</h1>
+        <p>This is a short paragraph</p>
     </div>
 )
 
-console.log(element)
+React.render(element, document.querySelector("#root"));
