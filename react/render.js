@@ -23,7 +23,6 @@ function createDom(fiber) {
         .forEach(name => {
             dom[name] = fiber.props[name];
         })
-
     return dom;
 }
 
@@ -75,8 +74,16 @@ function workLoop(deadline) {
 
 
 function performUnitOfWork(fiber) {
-    if (!fiber.dom) {
-        fiber.dom = createDom(fiber);
+    const isFunctionComponent = fiber.type instanceof Function
+    if (isFunctionComponent){
+        const childrenVDomList = [fiber.type(fiber.props)];
+        reconcileChildren(fiber, childrenVDomList);
+    } else {
+        if (!fiber.dom) {
+            fiber.dom = createDom(fiber);
+        }
+        const childrenVDomList = fiber.props.children;
+        reconcileChildren(fiber, childrenVDomList);
     }
     // 1. 添加dom (可能回造成局部的UI更新, 所以这个步骤被删除)
     // if (fiber.parent) {
@@ -85,8 +92,7 @@ function performUnitOfWork(fiber) {
 
 
     // 2. 生成儿子们的fiber 并且完成 "father ---> first son ---> sibling --->" .... 的关系建立
-    const childrenVDom = fiber.props.children;
-    reconcileChildren(fiber, childrenVDom);
+
 
 
     // 有孩子返回孩子
@@ -176,6 +182,8 @@ function reconcileChildren(wipFiber, childrenVDomList) {
 
 function commitRoot() {
     deletions.forEach(commitWork);
+    console.log(wipRoot);
+
     commitWork(wipRoot.child);
     currentRoot = wipRoot;
     wipRoot = null;
@@ -185,12 +193,17 @@ function commitWork(fiber) {
     if (!fiber) {
         return;
     }
-    const domParent = fiber.parent.dom;
+    let domParentFiber = fiber.parent
+    while (!domParentFiber.dom) {
+        domParentFiber = domParentFiber.parent
+    }
+    const domParent = domParentFiber.dom;
+
     if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
         domParent.appendChild(fiber.dom);
     } else if (fiber.effectTag === "DELETION") {
-        domParent.removeChild(fiber.dom);
-    } else {
+        commitDeletion(fiber, domParent);
+    } else if (fiber.effectTag === "UPDATE") {
         updateDom(
             fiber.dom,
             fiber.alternate.props,
@@ -200,6 +213,15 @@ function commitWork(fiber) {
     commitWork(fiber.child);
     commitWork(fiber.sibling);
 }
+
+function commitDeletion(fiber, domParent) {
+    if (fiber.dom) {
+        domParent.removeChild(fiber.dom)
+    } else {
+        commitDeletion(fiber.child, domParent)
+    }
+}
+
 
 const isNew = (prev, next) => key => prev[key] !== next[key] // 是新加入的
 const isGone = (prev, next) => key => !(key in next) // 是被删除的

@@ -1,10 +1,4 @@
 import React from '../react';
+import App from './App';
 
-const element = (
-    <div id="foo">
-        <h1>React study</h1>
-        <p>This is a short paragraph</p>
-    </div>
-)
-
-React.render(element, document.querySelector("#root"));
+React.render(<App name="my react app"/>, document.querySelector("#root"));
