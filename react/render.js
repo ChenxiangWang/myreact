@@ -8,7 +8,7 @@
  * */
 
 let nextUnitOfWork = null;
-
+let wipRoot = null; // working in progress root
 
 
 function createDom (fiber) {
@@ -22,6 +22,8 @@ function createDom (fiber) {
         .forEach(name => {
             dom[name] = fiber.props[name];
         })
+
+    return dom;
 }
 
 
@@ -30,13 +32,15 @@ function createDom (fiber) {
  *  这个 root fiber 是 react梦的起点～
  * */
 export default function render (vDom, container) {
-    let rootFiber = {
+
+    // working in progress root
+    wipRoot = {
         dom: container,
         props: {
             children: [vDom],
         },
     }
-    nextUnitOfWork = rootFiber;
+    nextUnitOfWork = wipRoot;
     window.requestIdleCallback(workLoop);
 }
 
@@ -50,9 +54,13 @@ function workLoop (deadline) {
     let hasRunOutOfTime = false; // 检查这一次循环是否还有充足的时间
     while (nextUnitOfWork && !hasRunOutOfTime) {
         nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+        hasRunOutOfTime = deadline.timeRemaining() < 1;
     }
-    hasRunOutOfTime = deadline.timeRemaining() < 1;
-    window.requestIdleCallback(workLoop);
+    if (!nextUnitOfWork && !hasRunOutOfTime) {
+        commitRoot();
+    } else {
+        window.requestIdleCallback(workLoop);
+    }
 }
 
 
@@ -66,10 +74,10 @@ function performUnitOfWork (fiber) {
     if (!fiber.dom) {
         fiber.dom = createDom(fiber);
     }
-    // 1. 添加dom
-    if (fiber.return) {
-        fiber.return.dom.appendChild(fiber.dom);
-    }
+    // 1. 添加dom (可能回造成局部的UI更新)
+    // if (fiber.parent) {
+    //     fiber.parent.dom.appendChild(fiber.dom);
+    // }
 
     // 2. 生成儿子们的fiber 并且完成 father ---> first son ---> sibling ---> .... 关系建立
     const childrenVDom = fiber.props.children;
@@ -80,7 +88,7 @@ function performUnitOfWork (fiber) {
         const childFiber = {  // 根据 vdom 生成一个新的 fiber节点
             type: childVDom.type,
             props: childVDom.props,
-            return: fiber,
+            parent: fiber,
             dom: null
         }
 
@@ -111,4 +119,19 @@ function performUnitOfWork (fiber) {
         // 一层一层的返回父节点
         nextFiber = nextFiber.parent
     }
+}
+
+function commitRoot() {
+    commitWork(wipRoot.child);
+    wipRoot = null;
+}
+
+function commitWork(fiber) {
+    if (!fiber) {
+        return;
+    }
+    const domParent = fiber.parent.dom;
+    domParent.appendChild(fiber.dom);
+    commitWork(fiber.child);
+    commitWork(fiber.sibling);
 }
