@@ -7,10 +7,14 @@
  *
  * */
 
+let nextUnitOfWork = null;
+
+
+
 function createDom (fiber) {
     const dom =
         fiber.type === "TEXT_ELEMENT"
-            ? document.createTextNode(fiber);
+            ? document.createTextNode(fiber)
             : document.createElement(fiber.type);
     const isProperty = key => key !== "children";
     Object.keys(fiber.props)
@@ -29,13 +33,13 @@ export default function render (vDom, container) {
     let rootFiber = {
         dom: container,
         props: {
-            children: [element],
+            children: [vDom],
         },
     }
     nextUnitOfWork = rootFiber;
+    window.requestIdleCallback(workLoop);
 }
 
-let nextUnitOfWork = null;
 
 /**
  *  快乐循环工作流
@@ -48,7 +52,7 @@ function workLoop (deadline) {
         nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
     }
     hasRunOutOfTime = deadline.timeRemaining() < 1;
-    requestIdleCallback(workLoop);
+    window.requestIdleCallback(workLoop);
 }
 
 
@@ -60,7 +64,7 @@ function workLoop (deadline) {
  * */
 function performUnitOfWork (fiber) {
     if (!fiber.dom) {
-        fib.dom = createDom(fiber);
+        fiber.dom = createDom(fiber);
     }
     // 1. 添加dom
     if (fiber.parent) {
@@ -76,8 +80,8 @@ function performUnitOfWork (fiber) {
         const childFiber = {  // 根据 vdom 生成一个新的 fiber节点
             type: childVDom.type,
             props: childVDom.props,
-            parent: fiber,
-            dom: null;
+            return: fiber,
+            dom: null
         }
 
         if (index === 0) {
@@ -85,7 +89,7 @@ function performUnitOfWork (fiber) {
         } else {
             leftHandSideSibling.sibling = childFiber;
         }
-        prevSibling = childFiber;
+        leftHandSideSibling = childFiber;
         index ++;
     }
 
