@@ -67,7 +67,7 @@ function performUnitOfWork (fiber) {
         fiber.dom = createDom(fiber);
     }
     // 1. 添加dom
-    if (fiber.parent) {
+    if (fiber.return) {
         fiber.return.dom.appendChild(fiber.dom);
     }
 
