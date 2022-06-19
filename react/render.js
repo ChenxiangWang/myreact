@@ -9,9 +9,10 @@
 
 let nextUnitOfWork = null;
 let wipRoot = null; // working in progress root
+let currentRoot = null; // render 之前，当前页面所对应的 fiber root
+let deletions = null; // the nodes need to be removed.
 
-
-function createDom (fiber) {
+function createDom(fiber) {
     const dom =
         fiber.type === "TEXT_ELEMENT"
             ? document.createTextNode(fiber)
@@ -31,7 +32,7 @@ function createDom (fiber) {
  *  render 其实做的事情并不多，根据vDOm生成的一个 root fiber 节点
  *  这个 root fiber 是 react梦的起点～
  * */
-export default function render (vDom, container) {
+export default function render(vDom, container) {
 
     // working in progress root
     wipRoot = {
@@ -39,7 +40,9 @@ export default function render (vDom, container) {
         props: {
             children: [vDom],
         },
+        alternate: currentRoot // 指向当前页面中的相对应的 Fiber root节点
     }
+    deletions = [];
     nextUnitOfWork = wipRoot;
     window.requestIdleCallback(workLoop);
 }
@@ -50,56 +53,41 @@ export default function render (vDom, container) {
  *  工作 ---> 是否应该放弃 ---> 工作 ----> 是否应该放弃 。。。。
  */
 
-function workLoop (deadline) {
+function workLoop(deadline) {
     let hasRunOutOfTime = false; // 检查这一次循环是否还有充足的时间
     while (nextUnitOfWork && !hasRunOutOfTime) {
         nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
         hasRunOutOfTime = deadline.timeRemaining() < 1;
     }
-    if (!nextUnitOfWork && !hasRunOutOfTime) {
+    if (!nextUnitOfWork && wipRoot) {
         commitRoot();
-    } else {
+    }
+    if (nextUnitOfWork) {
         window.requestIdleCallback(workLoop);
     }
 }
 
 
 /**
- *  每一个工作单元的做的事情, 任务不多 3件事
- *  1. 添加dom
- *  2. 为儿子们创建fiber
- *  3. 返回下一个应该做的事
+ *  每一个工作单元的做的事情, 任务不多
+ *  相当仅仅是 创建儿子fiber，且建立起他们的父子 兄弟关系
  * */
-function performUnitOfWork (fiber) {
+
+
+function performUnitOfWork(fiber) {
     if (!fiber.dom) {
         fiber.dom = createDom(fiber);
     }
-    // 1. 添加dom (可能回造成局部的UI更新)
+    // 1. 添加dom (可能回造成局部的UI更新, 所以这个步骤被删除)
     // if (fiber.parent) {
     //     fiber.parent.dom.appendChild(fiber.dom);
     // }
 
-    // 2. 生成儿子们的fiber 并且完成 father ---> first son ---> sibling ---> .... 关系建立
-    const childrenVDom = fiber.props.children;
-    let leftHandSideSibling = null; // 刚开始左手边的兄弟肯定是没有滴
-    let index = 0;
-    while (index < childrenVDom.length) {
-        const childVDom = childrenVDom[index];
-        const childFiber = {  // 根据 vdom 生成一个新的 fiber节点
-            type: childVDom.type,
-            props: childVDom.props,
-            parent: fiber,
-            dom: null
-        }
 
-        if (index === 0) {
-            fiber.child = childFiber;
-        } else {
-            leftHandSideSibling.sibling = childFiber;
-        }
-        leftHandSideSibling = childFiber;
-        index ++;
-    }
+    // 2. 生成儿子们的fiber 并且完成 "father ---> first son ---> sibling --->" .... 的关系建立
+    const childrenVDom = fiber.props.children;
+    reconcileChildren(fiber, childrenVDom);
+
 
     // 有孩子返回孩子
     if (fiber.child) {
@@ -121,8 +109,75 @@ function performUnitOfWork (fiber) {
     }
 }
 
+/**
+ *  wipFiber: 当前的工作单元的fiber 节点
+ *  childrenVDomList：该fiber节点的 孩子的虚拟dom
+ *
+ *  在wipFiber中的alternate（之前的老的fiber节点），存在一条如下的单向链表：
+ *       wipFiber.child --> sibling --> sibling ---> sibling ---> wipFiber
+ *
+ *  childrenVDOMList:
+ *       [child1, child2, child2, child3]
+ *
+ *  以上单项连标和数组需要同时遍历
+ *
+ * */
+function reconcileChildren(wipFiber, childrenVDomList) {
+    let prevSibling = null; // 记录前面的兄弟节点
+
+    let oldFiber = wipFiber.alternate && wipFiber.alternate.children; // 第一个孩子的vDOM 对应的 之前的 上一次渲染的Fiber
+
+    for (let i=0; i<childrenVDomList.length; i++) {
+        let childVDOM = childrenVDomList[i]; // 当前孩子vDOM
+        let newFiber = null;
+        const sameType = oldFiber && childVDOM.type === oldFiber.type;
+        // 一样的类型
+        if (sameType) {
+            newFiber = {
+                type: oldFiber.type,
+                props: childVDOM.props,
+                dom: oldFiber.dom,
+                parent: wipFiber,
+                alternate: oldFiber,
+                effectTag: "UPDATE",
+            }
+        // 不一样的类型 或者 这是一个新的节点
+        } else {
+            newFiber = {
+                type: childVDOM.type,
+                props: childVDOM.props,
+                dom: null,
+                parent: wipFiber,
+                alternate: null,
+                effectTag: "PLACEMENT",
+            }
+        }
+        // 移动向下一个单项链表
+        if (oldFiber) {
+            oldFiber = oldFiber.sibling;
+        }
+        // 建立父子关系
+        if (i===0) {
+            wipFiber.child = newFiber;
+        }
+        // 建立兄弟关系
+        if (prevSibling) {
+            prevSibling.sibling = newFiber;
+        } else {
+            prevSibling = newFiber;
+        }
+    }
+    while (oldFiber) {
+        oldFiber.effectTag = "DELETION";
+        deletions.push(oldFiber);
+        oldFiber = oldFiber.sibling;
+    }
+}
+
 function commitRoot() {
+    deletions.forEach(commitWork);
     commitWork(wipRoot.child);
+    currentRoot = wipRoot;
     wipRoot = null;
 }
 
@@ -131,7 +186,72 @@ function commitWork(fiber) {
         return;
     }
     const domParent = fiber.parent.dom;
-    domParent.appendChild(fiber.dom);
+    if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+        domParent.appendChild(fiber.dom);
+    } else if (fiber.effectTag === "DELETION") {
+        domParent.removeChild(fiber.dom);
+    } else {
+        updateDom(
+            fiber.dom,
+            fiber.alternate.props,
+            fiber.props,
+        )
+    }
     commitWork(fiber.child);
     commitWork(fiber.sibling);
+}
+
+const isNew = (prev, next) => key => prev[key] !== next[key] // 是新加入的
+const isGone = (prev, next) => key => !(key in next) // 是被删除的
+const isEvent = key => key.startsWith("on") // 事件监听属性
+const isProperty = key => key !== "children" && !isEvent(key) //我们想要处理的props
+
+function updateDom(dom, prevProps, nextProps) {
+    // 删除以前的或者修改过的事件监听
+    Object.keys(prevProps)
+        .filter(isEvent)
+        .filter(
+            key =>
+                !(key in nextProps) ||
+                isNew(prevProps, nextProps)(key)
+        )
+        .forEach(name => {
+            const eventType = name
+                .toLowerCase()
+                .substring(2)
+            dom.removeEventListener(
+                eventType,
+                prevProps[name]
+            )
+        })
+
+    // 删除老的属性
+    Object.keys(prevProps)
+        .filter(isProperty)
+        .filter(isGone(prevProps, nextProps))
+        .forEach(name => {
+            dom[name] = ""
+        })
+
+    // 添加新的 或者修改过的属性
+    Object.keys(nextProps)
+        .filter(isProperty)
+        .filter(isNew(prevProps, nextProps))
+        .forEach(name => {
+            dom[name] = nextProps[name]
+        })
+
+    // 添加新的事件
+    Object.keys(nextProps)
+        .filter(isEvent)
+        .filter(isNew(prevProps, nextProps))
+        .forEach(name => {
+            const eventType = name
+                .toLowerCase()
+                .substring(2)
+            dom.addEventListener(
+                eventType,
+                nextProps[name]
+            )
+        })
 }
