@@ -1,11 +1,9 @@
 import React from '../react';
+import TaskApp from './TaskApp';
 
 function App(props) {
     return (
-        <div>
-            <h1>hi {props.name}</h1>
-            <p>This my first react App</p>
-        </div>
+        <TaskApp/>
     );
 }
 
