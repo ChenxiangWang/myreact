@@ -1,6 +1,6 @@
 import { createElement } from './createElement'
-import render from "./render";
+import render, { useState } from "./render";
 
-const React = { createElement, render }
+const React = { createElement, render, useState}
 
 export default React;
