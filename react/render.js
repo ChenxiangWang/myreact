@@ -12,6 +12,10 @@ let wipRoot = null; // working in progress root
 let currentRoot = null; // render 之前，当前页面所对应的 fiber root
 let deletions = null; // the nodes need to be removed.
 
+// hooks 相关
+let wipFiber = null;
+let hookIndex = null;
+
 function createDom(fiber) {
     const dom =
         fiber.type === "TEXT_ELEMENT"
@@ -61,10 +65,9 @@ function workLoop(deadline) {
     if (!nextUnitOfWork && wipRoot) {
         commitRoot();
     }
-    if (nextUnitOfWork) {
-        window.requestIdleCallback(workLoop);
-    }
+    window.requestIdleCallback(workLoop);
 }
+
 
 
 /**
@@ -76,14 +79,13 @@ function workLoop(deadline) {
 function performUnitOfWork(fiber) {
     const isFunctionComponent = fiber.type instanceof Function
     if (isFunctionComponent){
-        const childrenVDomList = [fiber.type(fiber.props)];
-        reconcileChildren(fiber, childrenVDomList);
+        updateFunctionComponent(fiber);
     } else {
         if (!fiber.dom) {
             fiber.dom = createDom(fiber);
         }
         const childrenVDomList = fiber.props.children;
-        reconcileChildren(fiber, childrenVDomList);
+        reconcileChildren(fiber, childrenVDomList.flat());
     }
     // 1. 添加dom (可能回造成局部的UI更新, 所以这个步骤被删除)
     // if (fiber.parent) {
@@ -114,6 +116,43 @@ function performUnitOfWork(fiber) {
         nextFiber = nextFiber.parent
     }
 }
+/**
+ *  Hooks related
+ * */
+
+function updateFunctionComponent(fiber) {
+    wipFiber = fiber;
+    hookIndex = 0;
+    wipFiber.hooks = [];
+    const children = [fiber.type(fiber.props)];
+    reconcileChildren(fiber, children)
+}
+
+export function useState (initial) {
+    const oldHook = wipFiber.alternate && wipFiber.alternate.hooks && wipFiber.alternate.hooks[hookIndex];
+    const hook = {
+        state: oldHook ? oldHook.state : initial,
+        queue: [],
+    }
+    const actions = oldHook? oldHook.queue : [];
+    actions.forEach(action => {
+        hook.state = action(hook.state);
+    })
+    const setState = action => {
+        hook.queue.push(action);
+        wipRoot = {
+            dom: currentRoot.dom,
+            props: currentRoot.props,
+            alternate: currentRoot,
+        }
+        nextUnitOfWork = wipRoot;
+        deletions = [];
+    }
+    wipFiber.hooks.push(hook);
+    hookIndex++;
+    return [hook.state, setState];
+}
+
 
 /**
  *  wipFiber: 当前的工作单元的fiber 节点
@@ -131,7 +170,7 @@ function performUnitOfWork(fiber) {
 function reconcileChildren(wipFiber, childrenVDomList) {
     let prevSibling = null; // 记录前面的兄弟节点
 
-    let oldFiber = wipFiber.alternate && wipFiber.alternate.children; // 第一个孩子的vDOM 对应的 之前的 上一次渲染的Fiber
+    let oldFiber = wipFiber.alternate && wipFiber.alternate.child; // 第一个孩子的vDOM 对应的 之前的 上一次渲染的Fiber
 
     for (let i=0; i<childrenVDomList.length; i++) {
         let childVDOM = childrenVDomList[i]; // 当前孩子vDOM
@@ -169,9 +208,11 @@ function reconcileChildren(wipFiber, childrenVDomList) {
         // 建立兄弟关系
         if (prevSibling) {
             prevSibling.sibling = newFiber;
+            prevSibling = newFiber;
         } else {
             prevSibling = newFiber;
         }
+
     }
     while (oldFiber) {
         oldFiber.effectTag = "DELETION";
@@ -182,7 +223,6 @@ function reconcileChildren(wipFiber, childrenVDomList) {
 
 function commitRoot() {
     deletions.forEach(commitWork);
-    console.log(wipRoot);
 
     commitWork(wipRoot.child);
     currentRoot = wipRoot;
@@ -198,17 +238,12 @@ function commitWork(fiber) {
         domParentFiber = domParentFiber.parent
     }
     const domParent = domParentFiber.dom;
-
     if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
         domParent.appendChild(fiber.dom);
+    } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+        updateDom(fiber.dom, fiber.alternate.props, fiber.props);
     } else if (fiber.effectTag === "DELETION") {
         commitDeletion(fiber, domParent);
-    } else if (fiber.effectTag === "UPDATE") {
-        updateDom(
-            fiber.dom,
-            fiber.alternate.props,
-            fiber.props,
-        )
     }
     commitWork(fiber.child);
     commitWork(fiber.sibling);
